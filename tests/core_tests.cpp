@@ -30,6 +30,20 @@ int main(int argc,char** argv){try {
         check(!parse_config(bytes,c));check(!c.enabled && c.alias==alias);
     }
     check(parse_config("enabled=true\r\nalias_uid=0\r\n",c) && c.enabled && c.alias==L"0");
+    check(!c.maskName && !c.maskShort); // legacy saved config keeps UID behavior, new fields opt-in.
+    check(parse_config("enabled=true\nalias_uid=4\nmask_name=true\nalias_name=昵称🙂\nmask_short_id=true\nalias_short_id=0007\n",c));
+    check(c.aliasName==U"昵称🙂" && c.aliasShort==U"0007");
+    for(auto bad:{"alias_name=<b>x</b>\n","alias_name=\xff\n","alias_name=\n","mask_name=yes\n","mask_name=true\nmask_name=false\n","alias_short_id=#001\n"})check(!parse_config(std::string("enabled=true\nalias_uid=4\n")+bad,c));
+    Identity identity{U"1000123456",U"测试🙂",U"0042"};
+    c.aliasName=U"1000123456";c.alias=L"123";
+    // Verify nickname does not override UID alias
+    check(render_identity(U"测试🙂#0042 / UID: 1000123456",identity,c)==U"1000123456#0007 / UID: 123");
+    check(render_identity(U"正文测试🙂#0042",identity,c)==U"正文测试🙂#0042");
+    check(render_identity(U"他人#0042 / 测试🙂#0043",identity,c)==U"他人#0042 / 测试🙂#0043");
+    check(render_identity(U"<link=测试🙂#0042>普通</link>",identity,c)==U"<link=测试🙂#0042>普通</link>");
+    check(render_identity(U"  测试🙂  ",identity,c)==U"  1000123456  ");
+    check(render_identity(U"测试🙂#0042suffix",identity,c)==U"测试🙂#0042suffix");
+    check(scalar_text(L"测试🙂")==U"测试🙂");
     const std::string fixture=
         "UIDPanelCtrl = HL.Class('UIDPanelCtrl', uiCtrl.UICtrl)\n"
         "UIDPanelCtrl.OnCreate = HL.Override(HL.Any) << function(self, arg)\n"

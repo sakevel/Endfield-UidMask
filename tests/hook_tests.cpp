@@ -22,6 +22,7 @@ int main(int argc,char** argv){try{
     auto backingRaw=reinterpret_cast<const wchar_t*(*)()>(GetProcAddress(fixture,"FixtureBackingRaw"));
     auto flag=reinterpret_cast<unsigned(*)()>(GetProcAddress(fixture,"FixtureBufferFlag"));
     auto id=reinterpret_cast<void(*)(const wchar_t*)>(GetProcAddress(fixture,"FixtureIdentity"));
+    auto name=reinterpret_cast<void(*)(const wchar_t*,const wchar_t*)>(GetProcAddress(fixture,"FixtureName"));check(name);
     auto roots=reinterpret_cast<unsigned(*)()>(GetProcAddress(fixture,"FixtureRoots"));
     auto mode=reinterpret_cast<void(*)(int)>(GetProcAddress(fixture,"FixtureMode"));check(render && raw && id && roots && mode);
     auto invalidWrites=reinterpret_cast<unsigned(*)()>(GetProcAddress(fixture,"FixtureInvalidReferenceWrites"));check(invalidWrites);
@@ -37,6 +38,7 @@ int main(int argc,char** argv){try{
     std::string scenario=argc==5?argv[4]:"positive";
     if(scenario=="reject")mode(1);
     if(scenario=="layout-reject")mode(2);
+    if(scenario=="name-reject")mode(6);
     if(scenario=="rollback")deny=true;
     int success=plugin->start(&host);
     if(scenario=="legacy-reference-repro"){
@@ -44,7 +46,7 @@ int main(int argc,char** argv){try{
         render(L"UID: 1000123456",3);
         check(invalidWrites()>0);check(roots()==0);
         check(std::wstring(backingRaw())==L"UID: 1000123456");
-        std::cout<<"REPRODUCED: v0.1.1 sends a stack address to the object-reference setter\n";
+        std::cout<<"VERIFIED: stack address passed to object-reference setter\n";
     }else if(scenario=="legacy-repro"){
         check(success==1);check(std::wstring(render(L"UID: 1000123456",3))==L"UID: 1000123456");
         std::cout<<"REPRODUCED: legacy string hooks leave direct-buffer UID unchanged\n";
@@ -80,12 +82,29 @@ int main(int argc,char** argv){try{
         check(std::wstring(render(L"1000123456",1))==L"123456789");
         save("alias_uid=<bad>\nenabled=true\n");
         check(std::wstring(render(L"1000123456",1))==L"123456789");
+        // Native DLL performs Unicode/scoped-name edits in the same verified buffer path.
+        save("alias_uid=123456789\nenabled=true\nmask_name=true\nalias_name=新昵称🙂\nmask_short_id=true\nalias_short_id=0007\n");
+        for(auto text:{L"测试玩家",L"测试玩家#0042",L"<b>测试</b>玩家<size=12>#0042</size>",L"UID: 1000123456"}) {
+            auto expected=std::wstring(text)==L"测试玩家"?L"新昵称🙂":std::wstring(text)==L"测试玩家#0042"?L"新昵称🙂#0007":std::wstring(text)==L"UID: 1000123456"?L"UID: 123456789":L"<b>新昵称🙂</b><size=12>#0007</size>";
+            check(std::wstring(render(text,3))==expected);
+            check(std::wstring(raw())==text && std::wstring(backingRaw())==text && roots()==0 && flag()==0xABCDEF12);
+        }
+        for(auto text:{L"他人#0042",L"测试玩家#0043",L"测试玩家#00420",L"正文提到测试玩家",L"0042",L"#0042",L"<link=测试玩家#0042>他人</link>"})check(std::wstring(render(text,3))==text);
+        // No numeric ingestion/markup rewriting, no re-mask of inserted aliases.
+        save("alias_uid=123456789\nenabled=false\nmask_name=false\nalias_name=新昵称🙂\nmask_short_id=true\nalias_short_id=0007\n");
+        check(std::wstring(render(L"测试玩家#0042 / 1000123456",3))==L"测试玩家#0007 / 1000123456");
+        save("alias_uid=123456789\nenabled=false\nmask_name=true\nalias_name=新昵称🙂\nmask_short_id=false\nalias_short_id=0007\n");
+        check(std::wstring(render(L"测试玩家#0042",3))==L"新昵称🙂#0042");
+        name(L"账号二",L"0088");
+        check(std::wstring(render(L"测试玩家#0042 / 账号二#0088",3))==L"测试玩家#0042 / 新昵称🙂#0088");
+        name(L"测试玩家",L"0042");
+        save("alias_uid=123456789\nenabled=true\nmask_name=false\nmask_short_id=false\n");
         id(L"2000123456");
         check(std::wstring(render(L"1000123456 / 2000123456",0))==L"1000123456 / 123456789");
         id(L"");check(std::wstring(render(L"2000123456",0))==L"2000123456");
         check(roots()==0);
         check(invalidWrites()==0);
-        for(auto& s:logs)check(s.find("1000123456")==s.npos && s.find("876543210")==s.npos);
+        for(auto& s:logs)check(s.find("1000123456")==s.npos && s.find("876543210")==s.npos && s.find("测试玩家")==s.npos && s.find("新昵称")==s.npos && s.find("0042")==s.npos);
     }
     // Remove only test-owned files. DLL/hooks intentionally remain until this test process exits.
     for(auto file:{L"new.ini",L"config.ini"})std::filesystem::remove(state/file);

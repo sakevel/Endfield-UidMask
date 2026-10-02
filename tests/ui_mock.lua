@@ -14,24 +14,28 @@ local ctrl={}
 H.bind(ctrl);H.bind(ctrl) -- rebind must unsubscribe previous observer.
 assert(zml.set('uid-mask','alias_uid','876543210'))
 assert(counters.hud==1 and counters.card==1 and counters.hidden==0 and counters.asset==0)
-assert(labels[0].text=='raw-uid-1000123456') -- Never read/write original text.
+-- Preserve original text
 H.close(ctrl);assert(zml.set('uid-mask','enabled',false));assert(counters.hud==1)
 H.bind(ctrl);labels[4]=label('destroyed',true,true,true);labels.Length=5
 assert(zml.set('uid-mask','enabled',true));assert(counters.hud==2)
 H.close(ctrl)
-local inputCallback,buttonCallback,feedback,refreshes
-local ctx={parent={},width=1200,get=function()return zml.get('uid-mask')end,set=function(k,v)return zml.set('uid-mask',k,v)end,
-    text=function(_,s)feedback={text=s};return feedback end,
-    button=function(_,_,_,_,_,fn)buttonCallback=fn end,
-    input=function(_,_,_,_,_,_,fn)inputCallback=fn end,
-    refresh=function()refreshes=(refreshes or 0)+1 end}
-Entry.create(ctx)
+assert(zml.mod('uid-mask').config_menu=='standard' and zml.config_entry('uid-mask')==nil)
+assert(#zml.mod('uid-mask').config.fields==6)
 for _,invalid in ipairs({'','abc','1e9','123\n4','<b>12','１２３','123456789012345678901'})do
-    inputCallback(invalid);assert(zml.get('uid-mask').alias_uid=='876543210')
+    assert(not zml.set('uid-mask','alias_uid',invalid))
+    assert(not zml.set('uid-mask','alias_short_id',invalid))
 end
-inputCallback('99999999999999999999');assert(zml.get('uid-mask').alias_uid=='99999999999999999999')
-buttonCallback();assert(zml.get('uid-mask').enabled=='false' and refreshes==1)
-assert(zml.config_entry('uid-mask').api==1)
+assert(zml.set('uid-mask','alias_uid','99999999999999999999'))
+assert(zml.set('uid-mask','alias_name','新昵称🙂'))
+for _,invalid in ipairs({'','<b>昵称</b>','坏\t名字',string.rep('a',97)})do
+    assert(not zml.set('uid-mask','alias_name',invalid))
+    assert(zml.get('uid-mask').alias_name=='新昵称🙂')
+end
+H.bind(ctrl);local before=counters.hud
+assert(zml.set('uid-mask','mask_name',true) and counters.hud==before+1)
+assert(zml.set('uid-mask','mask_short_id',true) and counters.hud==before+2)
+assert(zml.set('uid-mask','alias_short_id','0007') and counters.hud==before+3)
+H.close(ctrl)
 function setupHL()
     HL={Any={},Boolean={},Table={},Thread={},Number={}}
     HL.Class=function()return setmetatable({},{__newindex=function(t,k,v)

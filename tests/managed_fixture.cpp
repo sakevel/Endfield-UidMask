@@ -33,10 +33,13 @@ std::wstring decode(Buffer b){std::wstring s;
     return s;
 }
 void* source{};std::wstring rendered,rawBuffer;std::wstring identity=L"1000123456";
+std::wstring nickname=L"测试玩家", shortId=L"0042";
 int game,player,info,tmp,bufferClass,arrayClass,uintClass;unsigned roots{},invalidReferenceWrites{};int mode{};
 int identityField,bufferField,arrayField,countField;
 __declspec(noinline) void* get_player(const void*){return &player;}
 __declspec(noinline) void* get_role(void*,const void*){return str(identity);}
+__declspec(noinline) void* get_name(void*,const void*){return str(nickname);}
+__declspec(noinline) void* get_short(void*,const void*){return str(shortId);}
 __declspec(noinline) void* get_text(void*,const void*){return source;}
 __declspec(noinline) void backing(void* self,void* s,const void*){fill(static_cast<Label*>(self),s?static_cast<String*>(s)->value:L"");}
 __declspec(noinline) void slice(void* self,void* s,int i,int n,const void*){fill(static_cast<Label*>(self),s?static_cast<String*>(s)->value.substr(i,n):L"");}
@@ -52,6 +55,8 @@ Method methods[]{
     {reinterpret_cast<void*>(&backing),"PopulateTextBackingArray","System.Void",{"System.String"},false},
     {reinterpret_cast<void*>(&slice),"PopulateTextBackingArray","System.Void",{"System.String","System.Int32","System.Int32"},false},
     {reinterpret_cast<void*>(&processing),"PopulateTextProcessingArray","System.Void",{},false},
+    {reinterpret_cast<void*>(&get_name),"get_playerName","System.String",{},false},
+    {reinterpret_cast<void*>(&get_short),"get_shortId","System.String",{},false},
 };
 struct Image {const char* name;};Image images[]{ {"Gameplay.Beyond.dll"},{"Unity.TextMeshPro.dll"},{"mscorlib.dll"} };
 const void* assemblies[]{&images[0],&images[1],&images[2]};
@@ -72,14 +77,16 @@ API void* il2cpp_class_from_name(const void* img,const char* ns,const char* name
 }
 API const void* il2cpp_class_get_methods(void* cls,void** it){
     size_t i=reinterpret_cast<size_t>(*it);
-    size_t first=cls==&game?0:cls==&info?1:2,count=cls==&game||cls==&info?1:cls==&tmp?4:0;
-    if(i>=count)return nullptr;*it=reinterpret_cast<void*>(i+1);return &methods[first+i];
+    size_t first=cls==&game?0:2,count=cls==&game?1:cls==&info?3:cls==&tmp?4:0;
+    if(i>=count)return nullptr;*it=reinterpret_cast<void*>(i+1);
+    const size_t infoMethods[]{1,6,7};return &methods[cls==&info?infoMethods[i]:first+i];
 }
 API const char* il2cpp_method_get_name(const void* m){return static_cast<const Method*>(m)->name;}
 API unsigned il2cpp_method_get_param_count(const void* m){return static_cast<unsigned>(static_cast<const Method*>(m)->params.size());}
 API const void* il2cpp_method_get_param(const void* m,unsigned i){return static_cast<const Method*>(m)->params.at(i);}
 API const void* il2cpp_method_get_return_type(const void* m){
     if(mode==1 && m==&methods[5])return "System.Object";
+    if(mode==6 && m==&methods[7])return "System.Int32";
     return static_cast<const Method*>(m)->result;
 }
 API unsigned il2cpp_method_get_flags(const void* m,unsigned* flags){*flags=0;return static_cast<const Method*>(m)->stat?0x10:0;}
@@ -87,6 +94,7 @@ API char* il2cpp_type_get_name(const void* t){return _strdup(static_cast<const c
 API void il2cpp_free(void* p){std::free(p);}
 API void* il2cpp_runtime_invoke(const void* m,void* self,void**,void** error){
     *error=nullptr;if(m==&methods[0])return get_player(m);if(m==&methods[1])return get_role(self,m);
+    if(m==&methods[6])return get_name(self,m);if(m==&methods[7])return get_short(self,m);
     *error=&game;return nullptr;
 }
 API const void* il2cpp_class_get_field_from_name(void* cls,const char* name){
@@ -107,7 +115,7 @@ API void il2cpp_field_get_value(void* object,const void* f,void* out){
     else if(f==&bufferField)std::memcpy(out,&static_cast<Label*>(object)->buffer,sizeof(Buffer));
     else if(f==&arrayField)*static_cast<Array**>(out)=static_cast<Box*>(object)->value.array;
     else if(f==&countField)*static_cast<int*>(out)=static_cast<Box*>(object)->value.count;
-    else std::abort(); // contract violation fails the fixture, not a C-export exception
+    // Fail fixture on contract violation
 }
 API void il2cpp_field_set_value(void* object,const void* f,void* value){
     if(f==&bufferField)std::memcpy(&static_cast<Label*>(object)->buffer,value,sizeof(Buffer));
@@ -154,6 +162,7 @@ API const wchar_t* FixtureRaw(){return static_cast<String*>(source)->value.c_str
 API const wchar_t* FixtureBackingRaw(){rawBuffer=decode(label.buffer);return rawBuffer.c_str();}
 API unsigned FixtureBufferFlag(){return label.buffer.flag;}
 API void FixtureIdentity(const wchar_t* s){identity=s;}
+API void FixtureName(const wchar_t* name,const wchar_t* suffix){nickname=name;shortId=suffix;}
 API unsigned FixtureRoots(){return roots;}
 API unsigned FixtureInvalidReferenceWrites(){return invalidReferenceWrites;}
 API void FixtureMode(int n){mode=n;}

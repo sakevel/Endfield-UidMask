@@ -13,7 +13,7 @@ using namespace uid_mask;
 struct Runtime {
     const ZmlHost* host{};
     Managed api;
-    Method player, role;
+    Method player, role, name, shortId;
     const void* infoField{};
     std::filesystem::path configPath;
     Config config;
@@ -25,7 +25,7 @@ struct Runtime {
     void* targets[1]{};
     void (*processing)(void*,const void*){};
     std::atomic_bool hit=false, masked=false, failed=false;
-    std::atomic_bool identityAvailable=false, identityUnavailable=false, candidate=false, sameAlias=false;
+    std::atomic_bool identityAvailable=false, identityUnavailable=false, candidate=false;
     std::atomic_bool active=false;
     void log(const char* message) {host->log(host->owner,message);}
     Config settings() {
@@ -34,27 +34,33 @@ struct Runtime {
         if(!GetFileAttributesExW(configPath.c_str(),GetFileExInfoStandard,&info))return config;
         if(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))return config;
         if(knownStamp && CompareFileTime(&stamp,&info.ftLastWriteTime)==0 && size==info.nFileSizeLow)return config;
-        // Cache rejected revisions as well; don't flood logs or reread every glyph.
+        // Cache current configuration revision
         knownStamp=true;stamp=info.ftLastWriteTime;size=info.nFileSizeLow;
-        if(info.nFileSizeHigh || size>65536){log("config_rejected; previous valid settings retained");return config;}
+        if(info.nFileSizeHigh || size>65536){log("config_rejected");return config;}
         std::ifstream input(configPath,std::ios::binary);
         std::string bytes{std::istreambuf_iterator<char>(input),{}};
         Config next;
-        if(input.bad() || !parse_config(bytes,next))log("config_rejected; previous valid settings retained");
+        if(input.bad() || !parse_config(bytes,next))log("config_rejected");
         else {config=std::move(next);log("config_applied");}
         return config;
     }
-    std::wstring own() {
-        // No timer/identity cache: logout or account switch takes effect on
-        // the next render instead of matching another player's text to old UID.
+    Identity own(bool readName) {
+        // Refresh player identity on render
         auto p=api.call(player);
         auto system=api.get(p,infoField);
         auto id=system?api.string(api.call(role,system)):std::wstring{};
-        return decimal(id)?id:std::wstring{};
+        if(!decimal(id))return {};
+        Identity own;own.uid.assign(id.begin(),id.end());
+        if(readName) {
+            own.name=scalar_text(api.string(api.call(name,system)));
+            auto suffix=api.string(api.call(shortId,system));
+            if(decimal(suffix))own.shortId.assign(suffix.begin(),suffix.end());
+        }
+        return own;
     }
 };
-Runtime* rt{}; // successful hooks/DLL are process-lifetime; never unload live callbacks.
-void error() {if(!rt->failed.exchange(true))rt->log("render_error; original display preserved");}
+Runtime* rt{}; // Runtime state singleton
+void error() {if(!rt->failed.exchange(true))rt->log("render_error");}
 void processing(void* self,const void* method) {
     if(!rt->active.load()){rt->processing(self,method);return;}
     if(!rt->hit.exchange(true))rt->log("processing_hook_hit");
@@ -62,38 +68,29 @@ void processing(void* self,const void* method) {
     bool replaced=false;
     try {
         swap=std::make_unique<Managed::BufferSwap>(rt->api,self);
-        if(swap->text.find_first_of(U"0123456789")!=swap->text.npos) {
-            auto id=rt->own();
-            if(id.empty()) {if(!rt->identityUnavailable.exchange(true))rt->log("identity_unavailable");}
+        auto cfg=rt->settings();
+        if(cfg.maskName || cfg.maskShort || (cfg.enabled && swap->text.find_first_of(U"0123456789")!=swap->text.npos)) {
+            auto own=rt->own(cfg.maskName || cfg.maskShort);
+            if(own.uid.empty()) {if(!rt->identityUnavailable.exchange(true))rt->log("identity_unavailable");}
             else {
                 if(!rt->identityAvailable.exchange(true))rt->log("identity_available");
-                std::u32string own(id.begin(),id.end());
-                if(swap->text.find(own)!=swap->text.npos) {
+                if(swap->text.find(own.uid)!=swap->text.npos) {
                     if(!rt->candidate.exchange(true))rt->log("uid_buffer_seen");
-                    auto cfg=rt->settings();
-                    if(cfg.enabled) {
-                        std::u32string alias(cfg.alias.begin(),cfg.alias.end());
-                        if(alias==own && !rt->sameAlias.exchange(true))rt->log("alias_matches_identity");
-                        auto value=mask_units<char32_t>(swap->text,own,alias);
-                        if(value!=swap->text) {
-                            swap->replace(value);
-                            replaced=true;
-                        }
-                    }
                 }
+                auto value=render_identity(swap->text,own,cfg);
+                if(value!=swap->text) {swap->replace(value);replaced=true;}
             }
         }
     }catch(...){swap.reset();error();}
-    // All ingestion paths converge here. Restore the original backing buffer
-    // on normal return or C++ unwinding; only generated processing data is fake.
+    // Restore original backing buffer on scope exit
     rt->processing(self,method);
-    if(replaced && !rt->masked.exchange(true))rt->log("render_masked; buffer readback verified and original processing returned");
+    if(replaced && !rt->masked.exchange(true))rt->log("render_masked");
 }
 int rewrite(void*,const char* src,size_t n,ZmlSink sink,void* writer) {
     try {
         std::string output;
         if(!src || !sink || !patch(std::string_view(src,n),rt->helper,output)) {
-            rt->log("refresh_contract_rejected; masking hooks remain independent");return 0;
+            rt->log("refresh_contract_rejected");return 0;
         }
         sink(writer,output.data(),output.size());return 1;
     }catch(...){return 0;}
@@ -117,9 +114,11 @@ int start(const ZmlHost* host) {
         auto tmp=r->api.klass("Unity.TextMeshPro.dll","TMPro","TMP_Text");
         r->player=r->api.method(game,"get_player","Beyond.Gameplay.GamePlayer",{},true);
         r->role=r->api.method(info,"get_roleId","System.String",{});
+        r->name=r->api.method(info,"get_playerName","System.String",{});
+        r->shortId=r->api.method(info,"get_shortId","System.String",{});
         r->infoField=r->api.field(player,"playerInfoSystem","Beyond.Gameplay.PlayerInfoSystem");
         auto proc=r->api.method(tmp,"PopulateTextProcessingArray","System.Void",{});
-        if(!r->player.code || !r->role.code || !r->infoField || !proc.code || !r->api.buffer_contract(tmp))
+        if(!r->player.code || !r->role.code || !r->name.code || !r->shortId.code || !r->infoField || !proc.code || !r->api.buffer_contract(tmp))
             throw std::runtime_error("read-only identity/render signature contract unavailable");
         r->targets[0]=proc.code;
         if(MH_Initialize()!=MH_OK)throw std::runtime_error("private MinHook init failed");
@@ -134,11 +133,11 @@ int start(const ZmlHost* host) {
             throw std::runtime_error("refresh transform registration failed");
         r->settings();
         rt=r.get();
-        // Queue our exact targets only; never touch another plugin's hooks.
+        // Register hook target
         for(auto target:r->targets)if(MH_QueueEnableHook(target)!=MH_OK)throw std::runtime_error("render hook queue failed");
         if(MH_ApplyQueued()!=MH_OK)throw std::runtime_error("render hook enable failed");
         rt->active=true;
-        rt->log("Render hook ready: shared processing stage; raw backing restored after parse");r.release();return 1;
+        rt->log("Render hook ready");r.release();return 1;
     }catch(const std::exception& e) {
         host->log(host->owner,e.what());
         r->active=false;bool clean=true;
@@ -148,7 +147,7 @@ int start(const ZmlHost* host) {
             else clean=false;
         }
         if(clean){if(initialized)MH_Uninitialize();rt=nullptr;}
-        else {rt=r.release();host->log(host->owner,"rollback_incomplete; inactive hook context retained for process lifetime");}
+        else {rt=r.release();host->log(host->owner,"rollback_incomplete");}
         return 0;
     }catch(...) {
         r->active=false;bool clean=true;

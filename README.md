@@ -43,4 +43,4 @@
 ..\Endfield-ModLoader\tools\install-mod.ps1 -ModPackage .\build\package\Release\uid-mask
 ```
 
-个人自定义配置保存在 `%LOCALAPPDATA%\ZML\mods\uid-mask\config.ini`。
+个人自定义配置保存在 `%LOCALAPPDATA%\EndfieldModLoader\mods\uid-mask\config.ini`。
