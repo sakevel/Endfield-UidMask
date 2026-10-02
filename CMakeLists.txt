@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(EndfieldUidMask VERSION 0.1.3 LANGUAGES C CXX)
+project(EndfieldUidMask VERSION 0.1.4 LANGUAGES C CXX)
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "Windows x64 required")
 endif()
